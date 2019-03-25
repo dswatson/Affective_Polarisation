@@ -1,5 +1,5 @@
 # Set working directory
-setwd('./Documents/IPP2018')
+setwd('./Documents/Affective_Polarisation')
 
 # Load libraries, register cores
 library(memisc)
@@ -10,7 +10,7 @@ library(doMC)
 registerDoMC(8)
 
 # Import data
-df <- readRDS('./Data/merged_1.rds') %>%
+df <- readRDS('./Data/merged.rds') %>%
   as.data.table(.)
 votes <- fread('./Data/Vote_share.csv')
 
@@ -42,7 +42,9 @@ likes <- df %>%
 fwrite(likes, './Data/likes.csv')
 likes <- fread('./Data/likes.csv')
 
-# Create personal hostility index (this actually takes a while)
+### COMPUTE INDICES ###
+
+# Personal hostility index (this actually takes a while)
 fn <- function(idx) {
   tmp <- likes[unique_id == idx]
   if (tmp[, any(is.na(like))]) {
@@ -61,8 +63,7 @@ fn <- function(idx) {
 }
 likes <- foreach(idx = likes[, unique(unique_id)], .combine = rbind) %dopar% 
   fn(idx)
-
-
+saveRDS(likes, './Data/likes_with_phi.rds')
 
 # Affective polarisation index (Reiljan, 2016)
 ap_idx <- function(yr, unit = 'all', strong_partisans = FALSE) {
@@ -158,6 +159,7 @@ out <- data.frame(
 df <- likes %>%
   select(-prop) %>%
   spread(key = to, value = like)
+saveRDS(df, './Data/likes_melt.rds')
 
 # Plot phi
 phi_df <- df %>%
@@ -168,177 +170,16 @@ phi_df <- df %>%
   rename(Year = year)
 out <- phi_df %>%
   inner_join(out, by = 'Year')
-
-
-df %>%
-  filter(!is.na(phi), !is.na(weight), year > 1992) %>%
-  group_by(year, partyId) %>%
-  summarise(PHI = weighted.mean(phi, weight),
-            SE = sd(phi) / sqrt(length(phi))) %>%
-  rename(Year = year) %>%
-  mutate(partyId = as.factor(partyId)) %>%
-  ggplot(aes(Year, PHI, group = partyId, color = partyId)) + 
-  geom_point() + 
-  geom_smooth(method = 'gam', se = FALSE, formula = y ~ s(x, k = 6)) + 
-  geom_errorbar(aes(ymin = PHI - SE, ymax = PHI + SE), width = 0.25) +
-  labs(title = 'PHI by Party Affiliation') + 
-  scale_color_d3() + 
-  theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5))
-
-df <- df %>% 
-  filter(!is.na(phi)) %>%
-  mutate(neg_phi = if_else(phi < 0, TRUE, FALSE)) %>%
-  group_by(year, partyId) %>%
-  mutate(prop_nphi = sum(neg_phi) / length(neg_phi)) %>%
-  select(year, partyId, prop_nphi) %>%
-  spread(year, prop_nphi)
-
-table(df$neg_phi, df$partyId, df$year)
+saveRDS(out, './Data/indices_per_yr.rds')
 
 
 
-# Plot change over time
-ggplot(out, aes(Year, AP)) + 
-  geom_point() + 
-  geom_smooth(method = 'loess', se = FALSE) + 
-  labs(y = 'Affective Polarisation', 
-       title = 'AP Over Time') + 
-  theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5))
-ggplot(out, aes(Year, MAP)) + 
-  geom_point() + 
-  geom_smooth(method = 'loess', se = FALSE) + 
-  labs(y = 'Mass Affective Polarisation',
-       title = 'MAP Over Time') + 
-  theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5))
-ggplot(out, aes(Year, PHI)) + 
-  geom_point() + 
-  geom_smooth(method = 'loess', se = FALSE, span = 0.75) +
-  geom_errorbar(aes(ymin = PHI - SE, ymax = PHI + SE), width = 0.25) + 
-  labs(y = 'Personal Hostility Index', 
-       title = 'PHI Over Time') + 
-  theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5))
-
-# Plot per party
-plot_fn <- function(party) {
-  if (party == 'Conservatives') {
-    pId <- 1
-  } else if (party == 'Labour') {
-    pId <- 2
-  } else if (party == 'Lib Dems') {
-    pId <- 3
-  }
-  df %>%
-    filter(partyId == pId, !is.na(phi), !is.na(weight)) %>%
-    group_by(year) %>%
-    summarise(PHI = weighted.mean(phi, weight),
-              SE = sd(phi) / sqrt(length(phi))) %>%
-    rename(Year = year) %>%
-    ggplot(aes(Year, PHI)) + 
-    geom_point() + 
-    geom_smooth(method = 'loess', se = FALSE, span = 0.75) +
-    geom_errorbar(aes(ymin = PHI - SE, ymax = PHI + SE), width = 0.25) + 
-    labs(y = 'Personal Hostility Index', 
-         title = paste('PHI Over Time:', party)) + 
-    theme_bw() + 
-    theme(plot.title = element_text(hjust = 0.5))
-}
-
-
-# For linear associations:
-ggplot(out, aes(AP, MAP, label = Year)) + 
-  geom_text() + 
-  geom_smooth(method = 'lm', se = FALSE) + 
-  labs(x = 'Affective Polarisation', 
-       y = 'Mass Affective Polarisation',
-       title = 'AP vs. MAP') + 
-  theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5))
 
 # Correlation test?
 with(out, cor.test(AP, MAP))
 
 # Linear model coefficients?
 summary(lm(AP ~ MAP, data = out))
-
-
-# Affective distance matrix, tbl output
-dm <- function(yr) {
-  
-  # Must be a year in likes
-  if (!yr %in% likes[, unique(year)]) {
-    stop('No survey data for ', yr)
-  }
-  
-  # Create affective distance matrix
-  mat <- matrix(nrow = 3, ncol = 3, dimnames = list(parties, parties))
-  for (i in parties) {
-    for (j in parties) {
-      tmp <- likes %>% filter(year == yr, from == i, to == j)
-      mat[i, j] <- 10 - mean(tmp$like, na.rm = TRUE)
-    }
-  }
-  
-  # Melt
-  mat %>%
-    as_tibble(.) %>%
-    gather(x, Distance) %>%
-    mutate(y = rep(parties, 3)) %>%
-    mutate(y = rep(parties, 3)) %>%
-    mutate(x = factor(x, levels = unique(parties)),
-           y = factor(y, levels = rev(unique(parties))),
-           year = yr) %>%
-    return(.)
-  
-}
-
-# Build big data frame
-dm_df <- foreach(yr = df[, unique(year)], .combine = rbind) %dopar% dm(yr) %>%
-  arrange(year)
-
-# Plot
-ggplot(dm_df, aes(x, y, fill = Distance)) + 
-  geom_tile() + 
-  scale_fill_gradientn(colors = brewer.pal(10L, 'RdBu')) +
-  coord_equal() + 
-  labs(title = 'Affective Distance Over Time',
-       x = 'Evaluated',
-       y = 'Evaluator') + 
-  theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  facet_wrap(~ year)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
