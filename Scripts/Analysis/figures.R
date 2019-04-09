@@ -5,6 +5,7 @@ setwd('./Documents/Affective_Polarisation')
 library(memisc)
 library(data.table)
 library(ggsci)
+library(RColorBrewer)
 library(tidyverse)
 library(doMC)
 registerDoMC(4)
@@ -52,8 +53,9 @@ df %>%
 ggsave('./Figures/phi_by_party_static.pdf')
 
 # Distance matrices
+likes <- fread('./Data/likes.csv')
+parties <- c('Con', 'Lab', 'LD')
 dm <- function(yr) {
-  
   # Must be a year in likes
   if (!yr %in% likes[, unique(year)]) {
     stop('No survey data for ', yr)
@@ -85,7 +87,7 @@ dm_df <- foreach(yr = df[, unique(year)], .combine = rbind) %dopar% dm(yr) %>%
 # Plot
 ggplot(dm_df, aes(x, y, fill = Distance)) + 
   geom_tile() + 
-  scale_fill_gradientn(colors = brewer.pal(10L, 'RdBu')) +
+  scale_fill_gradientn(colors = rev(brewer.pal(10L, 'RdBu'))) +
   coord_equal() + 
   labs(title = 'Affective Distance Over Time',
        x = 'Evaluated',
