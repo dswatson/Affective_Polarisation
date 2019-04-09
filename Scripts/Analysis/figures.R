@@ -53,51 +53,45 @@ df %>%
 ggsave('./Figures/phi_by_party_static.pdf')
 
 # Distance matrices
-likes <- fread('./Data/likes.csv')
+likes <- fread('./Data/likes.csv')[year > 1992]
 parties <- c('Con', 'Lab', 'LD')
-dm <- function(yr) {
-  # Must be a year in likes
-  if (!yr %in% likes[, unique(year)]) {
-    stop('No survey data for ', yr)
-  }
-  # Create affective distance matrix
-  mat <- matrix(nrow = 3, ncol = 3, dimnames = list(parties, parties))
-  for (i in parties) {
-    for (j in parties) {
-      tmp <- likes %>% filter(year == yr, from == i, to == j)
-      mat[i, j] <- 10 - mean(tmp$like, na.rm = TRUE)
-    }
-  }
-  # Melt
-  mat %>%
-    as_tibble(.) %>%
-    gather(x, Distance) %>%
-    mutate(y = rep(parties, 3)) %>%
-    mutate(y = rep(parties, 3)) %>%
-    mutate(x = factor(x, levels = unique(parties)),
-           y = factor(y, levels = rev(unique(parties))),
-           year = yr) %>%
-    return(.)
+dm_df <- crossing(Year = likes[, unique(year)],
+                  Evaluator = parties,
+                  Evaluated = parties)
+mu_fn <- function(yr, x, y) {
+  likes[year == yr & from == y & to == x, 10 - mean(like, na.rm = TRUE)]
 }
+se_fn <- function(yr, x, y) {
+  likes[year == yr & from == y & to == x, sd(like, na.rm = TRUE)]
+}
+dm_df <- dm_df %>%
+  rowwise(.) %>%
+  mutate(Distance = mu_fn(Year, Evaluated, Evaluator),
+         SE = se_fn(Year, Evaluated, Evaluator)) %>%
+  as.data.table(.)
 
-# Build big data frame
-dm_df <- foreach(yr = df[, unique(year)], .combine = rbind) %dopar% dm(yr) %>%
-  arrange(year)
-
-# Plot
-ggplot(dm_df, aes(x, y, fill = Distance)) + 
-  geom_tile() + 
-  scale_fill_gradientn(colors = rev(brewer.pal(10L, 'RdBu'))) +
-  coord_equal() + 
-  labs(title = 'Affective Distance Over Time',
-       x = 'Evaluated',
-       y = 'Evaluator') + 
+# Trajectories by party
+dm_df[Evaluator == 'Con', Evaluator := 'Conservative'
+  ][Evaluator == 'Lab', Evaluator := 'Labour'
+  ][Evaluator == 'LD', Evaluator := 'Lib Dem'
+  ][Evaluated == 'Con', Evaluated := 'Conservative'
+  ][Evaluated == 'Lab', Evaluated := 'Labour'
+  ][Evaluated == 'LD', Evaluated := 'Lib Dem'
+  ][, Evaluator := factor(Evaluator, 
+                          levels = c('Conservative', 'Labour', 'Lib Dem'))
+  ][, Evaluated := factor(Evaluated, 
+                          levels = c('Conservative', 'Labour', 'Lib Dem'))]
+ggplot(dm_df, aes(Year, Distance, group = Evaluated, color = Evaluated)) + 
+  geom_point() + 
+  geom_smooth(method = 'gam', se = FALSE, formula = y ~ s(x, k = 6),
+              size = 0.75) +
+  geom_errorbar(aes(ymin = Distance - SE, ymax = Distance + SE), width = 0.25) + 
+  scale_color_manual(name = 'Evaluating',
+                     labels = c('Conservative', 'Labour', 'Lib Dem'),
+                     values = pal_d3()(4)[c(1, 4, 2)]) +
+  labs(x = 'Year', y = 'Affective Distance') + 
   theme_bw() + 
-  theme(plot.title = element_text(hjust = 0.5)) + 
-  facet_wrap(~ year)
-
-
-
+  facet_wrap(~ Evaluator, nrow = 3)
 
 
 
