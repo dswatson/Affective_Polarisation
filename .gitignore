@@ -3,4 +3,12 @@
 .RData
 .Ruserdata
 .DS_Store
+.Rapp.history
+Data/
+MS/
+Results/
+*.rds
+*.docx
+*.pdf
+*.sav
 Affective_Polarisation.Rproj
